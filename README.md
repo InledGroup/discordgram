@@ -1,184 +1,182 @@
-# 🤖 discordgram
+# discordgram
 
-> **discordgram** es un puente bidireccional de alto rendimiento entre servidores de **Discord** y supergrupos con temas (topics) de **Telegram**, ejecutado enteramente sobre **Cloudflare Workers** mediante **Durable Objects**.
+> High-performance bidirectional bridge between Discord servers and Telegram forum supergroups, running on Cloudflare Workers using Durable Objects.
 
-Permite mantener sincronizadas las conversaciones de canales de Discord con temas de Telegram en tiempo real, incluyendo **respuestas citadas**, **imágenes**, **vídeos**, **gestión automatizada de canales** (estilo Flake) y un **panel de control web protegido por contraseña y captcha ALTCHA**.
-
----
-
-## ✨ Características Principales
-
-1. **Gestión Cómoda y Automatizada de Canales (Estilo Flake)**:
-   - **Auto-creación al crear canales en Discord**: Cada vez que creas un canal nuevo de texto en Discord, discordgram crea automáticamente el tema correspondiente en Telegram y los vincula sin reiniciar ni redesplegar nada.
-   - **Comandos interactivos en Telegram**:
-     - `/sync <ID_CANAL_DISCORD>`: Vincula el tema actual a un canal de Discord.
-     - `/syncall`: Descubre todos los canales de tu Discord y les crea su tema en Telegram automáticamente.
-     - `/unsync`: Desvincula el tema actual.
-     - `/synclist`: Muestra la lista de canales y temas actualmente emparejados.
-   - **Panel Web Interactivo (`/`)**: Visualiza el estado del gateway en vivo y añade o elimina canales cómodamente desde tu navegador.
-2. **Acceso Restringido al Panel de Control (Password + ALTCHA Captcha)**:
-   - Pantalla de acceso seguro con contraseña (`DASHBOARD_PASSWORD`) y verificación PoW **ALTCHA** (*Proof-of-Work* ligera e invisible contra bots).
-   - Sesión protegida mediante cookies seguras HTTP-Only firmadas con HMAC.
-3. **Contexto de Respuestas (Replies)**:
-   - Al responder a un mensaje en Discord o Telegram, el mensaje sincronizado incluye una cita destacada con el autor y el texto al que se respondió, para que nunca se pierda el hilo de la conversación.
-4. **Sincronización Multimedia**:
-   - **Discord ➔ Telegram**: Reenvía fotos, vídeos y adjuntos directamente a Telegram vía API.
-   - **Telegram ➔ Discord**: Descarga fotos y vídeos desde Telegram y los adjunta de forma nativa a los webhooks de Discord (manteniendo seguro tu token sin exponerlo en los mensajes).
-5. **Arquitectura Serverless 24/7**:
-   - Conexión persistente al Gateway de Discord v10 mediante un **Durable Object**.
-   - Reconexión automática con retroceso exponencial (*exponential backoff*) y alarmas periódicas de *keep-alive*.
+discordgram synchronizes text messages, reply quotes, photos, and videos in real time between Discord channels and Telegram forum topics. It includes automated channel synchronization, strict privacy protections for private staff channels, administrator-only command authorization, and an authenticated management dashboard protected by ALTCHA Proof-of-Work.
 
 ---
 
-## 📁 Estructura del Código
+## Features
+
+1. Automated Channel Management
+   - Automatic topic creation: When a new public text channel is created in Discord, a corresponding forum topic is automatically created in Telegram and paired instantly.
+   - Interactive Telegram bot commands:
+     - `/sync <DISCORD_CHANNEL_ID>`: Link the current Telegram topic to a Discord channel.
+     - `/syncall`: Scan your Discord server and automatically create topics for all public text channels.
+     - `/unsync`: Remove the synchronization link for the current topic.
+     - `/synclist`: Display all currently synchronized channel pairs.
+     - `/synchelp`: Display available commands and usage instructions.
+   - Web Management Dashboard: View real-time Gateway status, link existing topics, or unlink channels with one click.
+
+2. Privacy and Security Protections
+   - Strict private channel exclusion: Channels with restricted permissions where the `@everyone` role is denied viewing access, as well as staff, moderator, and development channels (such as `pulsar-devs`, `moderator-only`, `raidprotect`, `audit-logs`), are automatically excluded from auto-synchronization and message forwarding.
+   - Administrator-only authorization: In Telegram, synchronization commands (`/sync`, `/syncall`, `/unsync`) can only be executed by group administrators or the group creator.
+   - Password and ALTCHA authentication: The web dashboard is secured behind a password check and an official ALTCHA Proof-of-Work verification widget, generating HMAC-signed HTTP-Only session cookies.
+
+3. Reply Context Threading
+   - When users reply to messages in Discord or Telegram, the bridged message includes a formatted quote containing the original author's name and message preview, preserving conversational context across platforms.
+
+4. Media Synchronization
+   - Discord to Telegram: Extracts image, video, and file attachments and delivers them directly via the Telegram Bot API.
+   - Telegram to Discord: Fetches media files and uploads them natively as multipart attachments to channel webhooks, keeping your Telegram bot token private.
+
+5. 24/7 Serverless Architecture
+   - Maintains a persistent WebSocket connection to the Discord Gateway v10 inside a Cloudflare Durable Object.
+   - Automatic reconnects with exponential backoff and scheduled keep-alive alarms.
+
+---
+
+## Project Structure
 
 ```
 discordgram/
 ├── src/
-│   ├── index.ts        # Router principal de peticiones, webhooks y autenticación
-│   ├── auth.ts         # Acceso restringido, verificación ALTCHA y cookies de sesión
-│   ├── config.ts       # Constantes y configuración general
-│   ├── types.ts        # Definiciones TypeScript de Discord y Telegram
-│   ├── storage.ts      # Acceso persistente al mapa dinámico de canales
-│   ├── gateway.ts      # Durable Object para conexión WebSocket con Discord
-│   ├── status.ts       # Durable Object para almacenamiento de estado y canales
-│   ├── discord.ts      # Cliente API REST y gestión de webhooks de Discord
-│   ├── telegram.ts     # Cliente Bot API de Telegram y gestor de comandos
-│   ├── media.ts        # Procesamiento y descarga/reenvío de fotos y vídeos
-│   ├── replies.ts      # Formateo de citas de respuesta (HTML y Markdown)
-│   └── dashboard.ts    # Panel de control web visual (HTML/CSS/JS)
-├── wrangler.toml       # Configuración del Cloudflare Worker y Durable Objects
-├── package.json        # Dependencias y scripts
-└── tsconfig.json       # Configuración de TypeScript
+│   ├── index.ts        # Primary request router, webhook handlers, and auth checks
+│   ├── auth.ts         # ALTCHA challenge verification, password validation, session cookies
+│   ├── config.ts       # Shared constants and default fallbacks
+│   ├── types.ts        # TypeScript definitions for Discord, Telegram, and Worker env
+│   ├── storage.ts      # Persistent channel mapping access via Durable Objects
+│   ├── gateway.ts      # Durable Object managing Discord Gateway WebSocket connection
+│   ├── status.ts       # Durable Object storing runtime status and dynamic mappings
+│   ├── discord.ts      # Discord REST API client, webhook sender, and channel filters
+│   ├── telegram.ts     # Telegram Bot API client, topic management, and commands
+│   ├── media.ts        # Media extraction, download, and forwarding
+│   ├── replies.ts      # Reply quote formatting for HTML and Markdown
+│   └── dashboard.ts    # Web control panel interface
+├── wrangler.toml       # Cloudflare Workers and Durable Objects configuration
+├── package.json        # Dependencies and build scripts
+└── tsconfig.json       # TypeScript compiler settings
 ```
 
 ---
 
-## 🚀 Requisitos Previos
+## Prerequisites
 
-1. **Bot de Discord**:
-   - Creado en el [Discord Developer Portal](https://discord.com/developers/applications).
-   - En la sección **Bot** ➔ **Privileged Gateway Intents**, asegúrate de activar:
-     - ✅ **Server Members Intent**
-     - ✅ **Message Content Intent** (¡imprescindible para leer los mensajes!)
-   - Permisos del bot al invitarlo al servidor:
-     - `Manage Webhooks` (para crear los webhooks de envío por canal)
-     - `Read Messages / View Channels`
-     - `Send Messages`
-2. **Bot de Telegram**:
-   - Creado con [@BotFather](https://t.me/BotFather).
-   - Debe añadirse al supergrupo de Telegram como **Administrador** con permisos para:
-     - `Manage Topics` (Gestionar temas/foros)
-     - `Post Messages`
-3. **Supergrupo de Telegram**:
-   - El grupo debe tener los **Temas / Foros** activados (Ajustes del grupo ➔ Temas / Topics).
+1. Discord Bot:
+   - Created in the Discord Developer Portal.
+   - In the Bot tab under Privileged Gateway Intents, enable:
+     - Server Members Intent
+     - Message Content Intent
+   - Required bot permissions in your server:
+     - Manage Webhooks
+     - Read Messages / View Channels
+     - Send Messages
+
+2. Telegram Bot:
+   - Created with @BotFather.
+   - Added to your Telegram supergroup as an Administrator with permissions:
+     - Manage Topics
+     - Post Messages
+
+3. Telegram Supergroup:
+   - Must have Topics / Forums enabled in group settings.
 
 ---
 
-## ⚙️ Configuración
+## Configuration
 
-### 1. Variables en `wrangler.toml`
+### 1. Variables in `wrangler.toml`
 
-Edita [wrangler.toml](file:///home/jaime/Documentos/discordgram/wrangler.toml) según tu configuración:
+The `wrangler.toml` file contains general settings:
 
 ```toml
+name = "discordgram"
+main = "src/index.ts"
+compatibility_date = "2024-04-05"
+compatibility_flags = ["nodejs_compat"]
+
 [vars]
-# ID del supergrupo de Telegram (suele empezar por -100...)
-DEFAULT_TELEGRAM_CHAT_ID = "-1001234567890"
-
-# ID de tu servidor de Discord (necesario para /syncall y auto-descubrimiento)
-DISCORD_GUILD_ID = ""
-
-# Crear tema automáticamente en Telegram cuando se crea un canal de texto en Discord
+# Automatically create Telegram topics when new Discord text channels are created
 AUTO_CREATE_TOPICS = "true"
-
-# Contraseña de acceso al panel web
-DASHBOARD_PASSWORD = "admin"
 ```
 
-### 2. Configurar Secretos en Cloudflare
+### 2. Configure Secrets in Cloudflare
 
-Ejecuta los siguientes comandos para configurar las claves privadas de forma segura en Cloudflare:
+Store sensitive tokens securely using Wrangler secrets:
 
 ```bash
-# Token de tu bot de Discord
+# Discord Bot Token
 npx wrangler secret put DISCORD_BOT_TOKEN
 
-# Token de tu bot de Telegram
+# Telegram Bot Token
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 
-# Secreto opcional para verificar peticiones de Telegram
+# Optional secret for verifying Telegram webhook requests
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 
-# Contraseña del panel web (recomendado)
+# Target Telegram supergroup chat ID (e.g. -100xxxxxxxxxx)
+npx wrangler secret put DEFAULT_TELEGRAM_CHAT_ID
+
+# Discord Guild (Server) ID for auto-sync discovery
+npx wrangler secret put DISCORD_GUILD_ID
+
+# Web dashboard access password
 npx wrangler secret put DASHBOARD_PASSWORD
 ```
 
 ---
 
-## 🚢 Despliegue
+## Deployment
 
-```bash
-# Instalar dependencias
-npm install
+1. Install project dependencies:
+   ```bash
+   npm install
+   ```
 
-# Desplegar en Cloudflare
-npm run deploy
-```
+2. Deploy the Worker to Cloudflare:
+   ```bash
+   npm run deploy
+   ```
 
-Una vez desplegado, Cloudflare te dará la URL de tu worker (ejemplo: `https://discordgram.<tu-subdominio>.workers.dev`).
+3. Register the Telegram Webhook:
+   Point Telegram updates to your deployed worker endpoint:
+   ```bash
+   curl -F "url=https://<YOUR-WORKER-DOMAIN>/telegram/webhook" \
+        -F "secret_token=<YOUR_TELEGRAM_WEBHOOK_SECRET>" \
+        https://api.telegram.org/bot<YOUR_TELEGRAM_BOT_TOKEN>/setWebhook
+   ```
 
-### Configurar el Webhook de Telegram
-
-Configura el webhook de Telegram para que apunte a tu Worker:
-
-```bash
-curl -F "url=https://<TU-WORKER>.workers.dev/telegram/webhook" \
-     -F "secret_token=<TU_TELEGRAM_WEBHOOK_SECRET>" \
-     https://api.telegram.org/bot<TU_TELEGRAM_BOT_TOKEN>/setWebhook
-```
-
-### Iniciar la Conexión del Gateway de Discord
-
-Abre en tu navegador la URL de tu Worker: `https://<TU-WORKER>.workers.dev`, introduce tu contraseña, completa el captcha ALTCHA y pulsa **"Reconectar Gateway"**.
-
-¡El punto indicador del Gateway se pondrá en verde! 🟢
+4. Initialize Discord Gateway Connection:
+   Navigate to `https://<YOUR-WORKER-DOMAIN>/` in your browser, enter your dashboard password, complete the verification, and click "Reconectar Gateway".
 
 ---
 
-## 🪄 Cómo Añadir y Sincronizar Nuevos Canales
+## Channel Synchronization Guide
 
-Tienes 3 formas cómodas para añadir nuevos canales:
+You can pair channels using any of the following methods:
 
-### Opción 1: Automática al crear canales en Discord (Estilo Flake)
-Crea un canal nuevo de texto en tu servidor de Discord. Gracias al evento `CHANNEL_CREATE` del Gateway, **discordgram creará el tema en Telegram al instante** y comenzará a sincronizarlo sin que tengas que hacer nada.
-
-### Opción 2: Desde Telegram con comandos
-Entra al tema del foro en Telegram y escribe:
+### Method 1: Link Existing Topics via Telegram Commands
+Navigate to an existing topic in your Telegram supergroup and type:
 ```
-/sync <ID_DEL_CANAL_DE_DISCORD>
+/sync <DISCORD_CHANNEL_ID>
 ```
-El bot responderá confirmando que el tema ha quedado emparejado con el canal.
+The bot will associate that specific topic ID with the Discord channel.
 
-Para sincronizar todos los canales del servidor en lote:
+### Method 2: Batch Synchronization
+To discover and automatically create topics for all public text channels in your Discord server:
 ```
 /syncall
 ```
+Private channels, moderator chats, and internal development channels are automatically skipped.
 
-Para ver la lista de canales activos:
-```
-/synclist
-```
-
-### Opción 3: Desde el Panel de Control Web
-Accede a `https://<TU-WORKER>.workers.dev/` en tu navegador.
-En la sección **Canales Sincronizados**:
-1. Pega el ID del canal de Discord.
-2. Si dejas el campo *Tema Telegram* vacío, el bot consultará el nombre del canal en Discord y creará el tema por ti automáticamente.
-3. Pulsa **+ Vincular**.
+### Method 3: Web Dashboard
+Open `https://<YOUR-WORKER-DOMAIN>/` in your browser:
+1. Enter the Discord Channel ID.
+2. In the Telegram Thread ID field, enter an existing topic ID (such as `0` for the General topic), or leave it empty to automatically create a new topic.
+3. Click "+ Vincular".
 
 ---
 
-## 📜 Licencia
+## License
 
 MIT
