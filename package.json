@@ -1,0 +1,25 @@
+{
+  "name": "discordgram",
+  "version": "2.0.0",
+  "description": "Bi-directional bridge between Discord channels and Telegram forum topics on Cloudflare Workers",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "discord",
+    "telegram",
+    "bridge",
+    "cloudflare-workers",
+    "durable-objects"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240405.0",
+    "typescript": "^5.4.5",
+    "wrangler": "^3.50.0"
+  }
+}
