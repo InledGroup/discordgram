@@ -315,11 +315,6 @@ async function handleDiscordChannelCreated(env: Env, channelData: any): Promise<
 async function forwardDiscordToTelegram(env: Env, message: DiscordMessage): Promise<void> {
   if (message.author?.bot) return;
 
-  // Extra security check: Never forward messages from private channels
-  if (await checkIfChannelIsPrivate(env, message.channel_id, message.guild_id)) {
-    return;
-  }
-
   const channelMap = await getChannelMap(env);
   const target = findTelegramForDiscord(channelMap, message.channel_id);
   if (!target) return;

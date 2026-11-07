@@ -218,15 +218,9 @@ export async function handleTelegramCommands(
         return true;
       }
 
-      // Check if channel is private / moderator-only / staff / raidprotect
+      // Check if channel has private/restricted permissions
       const isPrivate = await checkIfChannelIsPrivate(env, channelId);
-      if (isPrivate) {
-        await reply(
-          `⛔ <b>Security Blocked:</b> Channel <code>${channelId}</code> was detected as a private or restricted channel (moderator-only, devs, raidprotect, admin, etc.).\n\n` +
-          `Private channels are blocked from synchronization for security and privacy reasons.`
-        );
-        return true;
-      }
+      const privNote = isPrivate ? "\n\n⚠️ <i>Note: This channel has restricted permissions in Discord. Linked by administrator request.</i>" : "";
 
       try {
         const channelName = await getChannelName(env, channelId);
@@ -239,7 +233,7 @@ export async function handleTelegramCommands(
         await reply(
           `✅ <b>Channel successfully linked!</b>\n\n` +
           `• <b>Discord:</b> #${escapeHtml(channelName)} (<code>${channelId}</code>)\n` +
-          `• <b>Telegram:</b> Topic <code>${threadId}</code> in this group.`
+          `• <b>Telegram:</b> Topic <code>${threadId}</code> in this group.${privNote}`
         );
       } catch (err) {
         await reply(`❌ Error linking channel: ${escapeHtml(String(err))}`);
