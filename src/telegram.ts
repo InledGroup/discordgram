@@ -1,5 +1,5 @@
 import { TELEGRAM_API } from "./config";
-import { getBotGuilds, getChannelName, listGuildTextChannels } from "./discord";
+import { checkIfChannelIsPrivate, getBotGuilds, getChannelName, listGuildTextChannels } from "./discord";
 import { MediaItem } from "./media";
 import { escapeHtml } from "./replies";
 import { deleteChannelMapping, findDiscordForTelegram, getChannelMap, saveChannelMapping } from "./storage";
@@ -14,14 +14,31 @@ export async function callApi(env: Env, method: string, body: unknown): Promise<
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Telegram API ${method} falló: ${res.status} ${errorText}`);
+    throw new Error(`Telegram API ${method} failed: ${res.status} ${errorText}`);
   }
 
   return await res.json();
 }
 
 /**
- * Crea un nuevo tema (forum topic) en un supergrupo de Telegram
+ * Checks if a user is an administrator or creator of the Telegram chat
+ */
+export async function isTelegramAdmin(env: Env, chatId: number, userId: number): Promise<boolean> {
+  try {
+    const res = await callApi(env, "getChatMember", {
+      chat_id: chatId,
+      user_id: userId,
+    });
+    const status = res.result?.status;
+    return status === "creator" || status === "administrator";
+  } catch (err) {
+    console.error("Error verifying Telegram admin status:", err);
+    return false;
+  }
+}
+
+/**
+ * Creates a new forum topic in a Telegram supergroup
  */
 export async function createForumTopic(
   env: Env,
@@ -79,7 +96,7 @@ export interface SendTelegramOptions {
 }
 
 /**
- * Envía un mensaje o medio a Telegram formateado con parse_mode HTML y citas
+ * Sends a message or media to Telegram formatted with HTML parse_mode
  */
 export async function sendTelegramMessage(env: Env, opts: SendTelegramOptions): Promise<void> {
   const { chatId, threadId, text, authorName, replyQuote, mediaItems } = opts;
@@ -87,7 +104,7 @@ export async function sendTelegramMessage(env: Env, opts: SendTelegramOptions): 
   let bodyText = escapeHtml(text || "");
   let header = "";
   if (authorName) {
-    header = `<b>${escapeHtml(authorName)}</b> (desde Discord):\n`;
+    header = `<b>${escapeHtml(authorName)}</b> (sent from Discord):\n`;
   }
 
   const quote = replyQuote || "";
@@ -100,14 +117,13 @@ export async function sendTelegramMessage(env: Env, opts: SendTelegramOptions): 
     basePayload.message_thread_id = threadId;
   }
 
-  // Si hay imágenes o vídeos adjuntos desde Discord
+  // If there are attached images or videos from Discord
   if (mediaItems && mediaItems.length > 0) {
     const firstMedia = mediaItems[0];
     const isSingle = mediaItems.length === 1;
 
     try {
       if (firstMedia.type === "photo" && isSingle) {
-        // Enviar foto con caption si cabe (límite 1024 caracteres)
         if (fullMessage.length <= 1024) {
           await callApi(env, "sendPhoto", {
             ...basePayload,
@@ -129,16 +145,15 @@ export async function sendTelegramMessage(env: Env, opts: SendTelegramOptions): 
         }
       }
     } catch (mediaErr) {
-      console.warn("Fallo enviando medio directo a Telegram, usando fallback con enlaces:", mediaErr);
-      // Fallback: Si Telegram falla al descargar la URL de Discord CDN, adjuntamos los links en el texto
+      console.warn("Direct media delivery to Telegram failed, falling back to URLs:", mediaErr);
     }
   }
 
-  // Fallback o mensaje de texto habitual:
+  // Text message fallback or standard message
   let finalContent = fullMessage;
   if (mediaItems && mediaItems.length > 0) {
     const mediaLinks = mediaItems.map((m, idx) => {
-      const label = m.type === "photo" ? "🖼️ Foto" : m.type === "video" ? "🎥 Vídeo" : "📎 Archivo";
+      const label = m.type === "photo" ? "🖼️ Photo" : m.type === "video" ? "🎥 Video" : "📎 Attachment";
       return `<a href="${m.url}">${label} ${idx + 1}</a>`;
     }).join(" | ");
 
@@ -156,7 +171,7 @@ export async function sendTelegramMessage(env: Env, opts: SendTelegramOptions): 
 }
 
 /**
- * Procesa comandos de bot en Telegram para gestionar canales de forma cómoda y automatizada
+ * Handles bot commands in Telegram with strict admin authorization checks
  */
 export async function handleTelegramCommands(
   env: Env,
@@ -166,7 +181,7 @@ export async function handleTelegramCommands(
   if (!text.startsWith("/")) return false;
 
   const [cmd, ...args] = text.split(/\s+/);
-  const command = cmd.toLowerCase().split("@")[0]; // soporte para /cmd@botname
+  const command = cmd.toLowerCase().split("@")[0];
   const chatId = message.chat.id;
   const threadId = message.message_thread_id ?? 0;
 
@@ -179,14 +194,36 @@ export async function handleTelegramCommands(
     });
   };
 
+  // 1. STRICT SECURITY: Verify if sender is an Administrator or Creator
+  const from = message.from;
+  if (!from) return false;
+
+  const isAdmin = await isTelegramAdmin(env, chatId, from.id);
+  if (!isAdmin) {
+    await reply(
+      "⛔ <b>Access Denied:</b> Only administrators of this group are authorized to execute synchronization commands."
+    );
+    return true;
+  }
+
   switch (command) {
     case "/sync":
     case "/link": {
       const channelId = args[0]?.trim();
       if (!channelId) {
         await reply(
-          "ℹ️ <b>Uso:</b> <code>/sync &lt;DISCORD_CHANNEL_ID&gt;</code>\n\n" +
-          "Vincula este tema de Telegram con el canal de Discord especificado."
+          "ℹ️ <b>Usage:</b> <code>/sync &lt;DISCORD_CHANNEL_ID&gt;</code>\n\n" +
+          "Links this Telegram topic with the specified Discord channel."
+        );
+        return true;
+      }
+
+      // Check if channel is private / moderator-only / staff / raidprotect
+      const isPrivate = await checkIfChannelIsPrivate(env, channelId);
+      if (isPrivate) {
+        await reply(
+          `⛔ <b>Security Blocked:</b> Channel <code>${channelId}</code> was detected as a private or restricted channel (moderator-only, devs, raidprotect, admin, etc.).\n\n` +
+          `Private channels are blocked from synchronization for security and privacy reasons.`
         );
         return true;
       }
@@ -200,12 +237,12 @@ export async function handleTelegramCommands(
         });
 
         await reply(
-          `✅ <b>¡Canal vinculado con éxito!</b>\n\n` +
+          `✅ <b>Channel successfully linked!</b>\n\n` +
           `• <b>Discord:</b> #${escapeHtml(channelName)} (<code>${channelId}</code>)\n` +
-          `• <b>Telegram:</b> Tema <code>${threadId}</code> en este grupo.`
+          `• <b>Telegram:</b> Topic <code>${threadId}</code> in this group.`
         );
       } catch (err) {
-        await reply(`❌ Error vinculando canal: ${escapeHtml(String(err))}`);
+        await reply(`❌ Error linking channel: ${escapeHtml(String(err))}`);
       }
       return true;
     }
@@ -216,14 +253,14 @@ export async function handleTelegramCommands(
       const discordChannelId = findDiscordForTelegram(channelMap, chatId, threadId);
 
       if (!discordChannelId) {
-        await reply("⚠️ Este tema de Telegram no está vinculado a ningún canal de Discord.");
+        await reply("⚠️ This Telegram topic is not linked to any Discord channel.");
         return true;
       }
 
       const existingName = channelMap[discordChannelId]?.name || discordChannelId;
       await deleteChannelMapping(env, discordChannelId);
 
-      await reply(`✅ Desvinculada la sincronización con el canal <b>#${escapeHtml(existingName)}</b> de Discord.`);
+      await reply(`✅ Unlinked synchronization for Discord channel <b>#${escapeHtml(existingName)}</b>.`);
       return true;
     }
 
@@ -233,18 +270,18 @@ export async function handleTelegramCommands(
       const entries = Object.entries(channelMap);
 
       if (entries.length === 0) {
-        await reply("ℹ️ No hay ningún canal configurado actualmente.");
+        await reply("ℹ️ No channels currently synchronized.");
         return true;
       }
 
       const lines = entries.map(([chanId, target]) => {
-        const name = target.name ? `#${target.name}` : `Canal ${chanId}`;
+        const name = target.name ? `#${target.name}` : `Channel ${chanId}`;
         const isCurrent = target.chatId === chatId && target.threadId === threadId;
-        const pointer = isCurrent ? " 📍 <i>(este tema)</i>" : "";
-        return `• <b>${escapeHtml(name)}</b> ➔ Tema <code>${target.threadId}</code>${pointer}`;
+        const pointer = isCurrent ? " 📍 <i>(this topic)</i>" : "";
+        return `• <b>${escapeHtml(name)}</b> ➔ Topic <code>${target.threadId}</code>${pointer}`;
       });
 
-      await reply(`📋 <b>Canales sincronizados (${entries.length}):</b>\n\n${lines.join("\n")}`);
+      await reply(`📋 <b>Synchronized channels (${entries.length}):</b>\n\n${lines.join("\n")}`);
       return true;
     }
 
@@ -259,16 +296,17 @@ export async function handleTelegramCommands(
 
       if (!guildId) {
         await reply(
-          "ℹ️ <b>Uso:</b> <code>/syncall &lt;DISCORD_GUILD_ID&gt;</code>\n\n" +
-          "No se detectó el servidor de Discord automáticamente. Por favor indica el ID de servidor."
+          "ℹ️ <b>Usage:</b> <code>/syncall &lt;DISCORD_GUILD_ID&gt;</code>\n\n" +
+          "Could not automatically detect a Discord server. Please provide the server ID."
         );
         return true;
       }
 
       try {
+        // listGuildTextChannels ALREADY strictly filters out private / staff / dev / raidprotect channels
         const channels = await listGuildTextChannels(env, guildId);
         if (channels.length === 0) {
-          await reply("⚠️ No se encontraron canales de texto en el servidor de Discord.");
+          await reply("⚠️ No public text channels found to synchronize.");
           return true;
         }
 
@@ -288,21 +326,22 @@ export async function handleTelegramCommands(
               createdCount++;
               createdNames.push(ch.name);
             } catch (topicErr) {
-              console.error(`Error creando tema para canal #${ch.name}:`, topicErr);
+              console.error(`Error creating topic for #${ch.name}:`, topicErr);
             }
           }
         }
 
         if (createdCount === 0) {
-          await reply("✅ Todos los canales de texto de Discord ya estaban sincronizados.");
+          await reply("✅ All eligible public text channels are already synchronized.");
         } else {
           await reply(
-            `🎉 <b>¡${createdCount} canales nuevos sincronizados!</b>\n` +
-            `Temas creados en Telegram:\n${createdNames.map((n) => `• #${escapeHtml(n)}`).join("\n")}`
+            `🎉 <b>${createdCount} new public channels synchronized!</b>\n` +
+            `Topics created:\n${createdNames.map((n) => `• #${escapeHtml(n)}`).join("\n")}\n\n` +
+            `🔒 <i>Private and staff channels (devs, moderator-only, raidprotect, etc.) were safely excluded.</i>`
           );
         }
       } catch (err) {
-        await reply(`❌ Error en syncall: ${escapeHtml(String(err))}`);
+        await reply(`❌ Error in syncall: ${escapeHtml(String(err))}`);
       }
       return true;
     }
@@ -310,13 +349,13 @@ export async function handleTelegramCommands(
     case "/synchelp":
     case "/start": {
       await reply(
-        "🤖 <b>Comandos de Discordgram:</b>\n\n" +
-        "• <code>/sync &lt;id_canal_discord&gt;</code>: Vincula el tema actual a un canal de Discord.\n" +
-        "• <code>/unsync</code>: Desvincula el tema actual.\n" +
-        "• <code>/synclist</code>: Lista todos los canales vinculados.\n" +
-        "• <code>/syncall</code>: Crea temas automáticamente para todos los canales de tu Discord.\n" +
-        "• <code>/synchelp</code>: Muestra esta ayuda.\n\n" +
-        "💡 <i>Los nuevos canales creados en Discord también se sincronizan automáticamente.</i>"
+        "🤖 <b>Discordgram Commands:</b>\n\n" +
+        "• <code>/sync &lt;discord_channel_id&gt;</code>: Link this topic to a Discord channel.\n" +
+        "• <code>/unsync</code>: Unlink this topic.\n" +
+        "• <code>/synclist</code>: List all synchronized channels.\n" +
+        "• <code>/syncall</code>: Automatically synchronize all public channels.\n" +
+        "• <code>/synchelp</code>: Display this help.\n\n" +
+        "🔒 <b>Security Note:</b> Only group administrators can run these commands. Private, staff, dev, and moderation channels are strictly excluded from synchronization."
       );
       return true;
     }

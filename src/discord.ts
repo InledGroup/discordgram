@@ -1,6 +1,52 @@
 import { DISCORD_API } from "./config";
 import { Env } from "./types";
 
+export const PRIVATE_KEYWORDS = [
+  "dev",
+  "devs",
+  "mod",
+  "mods",
+  "moderator",
+  "moderators",
+  "admin",
+  "admins",
+  "staff",
+  "raid",
+  "raidprotect",
+  "bot",
+  "bots",
+  "log",
+  "logs",
+  "ticket",
+  "tickets",
+  "private",
+  "secret",
+  "internal",
+  "audit",
+  "security",
+  "pulsar",
+  "sudo",
+  "donator",
+  "vip",
+  "system",
+  "command",
+  "commands",
+];
+
+export interface DiscordChannelRaw {
+  id: string;
+  name: string;
+  type: number;
+  parent_id?: string | null;
+  guild_id?: string;
+  permission_overwrites?: Array<{
+    id: string;
+    type: number;
+    allow: string;
+    deny: string;
+  }>;
+}
+
 export async function discordFetch(
   env: Env,
   method: string,
@@ -18,7 +64,7 @@ export async function discordFetch(
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Discord API ${method} ${path} falló: ${res.status} ${errorText}`);
+    throw new Error(`Discord API ${method} ${path} failed: ${res.status} ${errorText}`);
   }
 
   return res;
@@ -74,7 +120,7 @@ export async function sendDiscordMessage(params: SendDiscordParams): Promise<voi
     content: content || (fileBlob ? "" : " "),
   };
 
-  const SUFFIX = " (Telegram)";
+  const SUFFIX = " (sent from Telegram)";
   if (username) {
     const maxBase = 32 - SUFFIX.length;
     const base = username.length > maxBase ? username.slice(0, maxBase) : username;
@@ -89,7 +135,7 @@ export async function sendDiscordMessage(params: SendDiscordParams): Promise<voi
 
   if (fileBlob) {
     const formData = new FormData();
-    formData.append("files[0]", fileBlob, fileName || "archivo");
+    formData.append("files[0]", fileBlob, fileName || "file");
     formData.append("payload_json", JSON.stringify(payload));
 
     res = await fetch(webhookUrl, {
@@ -106,7 +152,7 @@ export async function sendDiscordMessage(params: SendDiscordParams): Promise<voi
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Fallo enviando a webhook de Discord: ${res.status} ${errText}`);
+    throw new Error(`Discord webhook send failed: ${res.status} ${errText}`);
   }
 }
 
@@ -124,6 +170,62 @@ export async function getChannelName(env: Env, channelId: string): Promise<strin
 }
 
 /**
+ * Comprueba de forma estricta si un canal es privado, de administración o restringido
+ */
+export function isChannelPrivate(
+  channel: DiscordChannelRaw,
+  categoriesById?: Map<string, DiscordChannelRaw>,
+  guildId?: string
+): boolean {
+  const nameLower = (channel.name || "").toLowerCase();
+
+  // 1. Coincidencia de palabras clave prohibidas en el nombre del canal
+  for (const kw of PRIVATE_KEYWORDS) {
+    if (nameLower.includes(kw)) {
+      return true;
+    }
+  }
+
+  // 2. Comprobar permisos explícitos en el canal (si @everyone tiene denegado VIEW_CHANNEL)
+  const gId = guildId || channel.guild_id;
+  if (channel.permission_overwrites && gId) {
+    const everyoneOverwrite = channel.permission_overwrites.find((ow) => ow.id === gId);
+    if (everyoneOverwrite) {
+      const denyBits = BigInt(everyoneOverwrite.deny || "0");
+      // VIEW_CHANNEL es el bit 10 (1 << 10 = 1024)
+      if ((denyBits & (1n << 10n)) !== 0n) {
+        return true;
+      }
+    }
+  }
+
+  // 3. Comprobar si la categoría padre es privada
+  if (channel.parent_id && categoriesById) {
+    const parentCategory = categoriesById.get(channel.parent_id);
+    if (parentCategory) {
+      const catName = (parentCategory.name || "").toLowerCase();
+      for (const kw of PRIVATE_KEYWORDS) {
+        if (catName.includes(kw)) {
+          return true;
+        }
+      }
+
+      if (parentCategory.permission_overwrites && gId) {
+        const catEveryone = parentCategory.permission_overwrites.find((ow) => ow.id === gId);
+        if (catEveryone) {
+          const denyBits = BigInt(catEveryone.deny || "0");
+          if ((denyBits & (1n << 10n)) !== 0n) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Obtiene los servidores (guilds) a los que pertenece el bot de Discord
  */
 export async function getBotGuilds(
@@ -134,13 +236,13 @@ export async function getBotGuilds(
     const guilds = (await res.json()) as Array<{ id: string; name: string }>;
     return guilds.map((g) => ({ id: g.id, name: g.name }));
   } catch (err) {
-    console.error("Error obteniendo servidores del bot de Discord:", err);
+    console.error("Error fetching bot Discord guilds:", err);
     return [];
   }
 }
 
 /**
- * Lista todos los canales de texto de un servidor (guild) de Discord
+ * Lista todos los canales de texto PÚBLICOS de un servidor de Discord (excluyendo automáticamente chats privados)
  */
 export async function listGuildTextChannels(
   env: Env,
@@ -148,14 +250,62 @@ export async function listGuildTextChannels(
 ): Promise<Array<{ id: string; name: string }>> {
   try {
     const res = await discordFetch(env, "GET", `/guilds/${guildId}/channels`);
-    const channels = (await res.json()) as Array<{ id: string; name: string; type: number }>;
-    // type 0 es canal de texto normal
-    return channels
-      .filter((c) => c.type === 0)
-      .map((c) => ({ id: c.id, name: c.name }));
+    const allChannels = (await res.json()) as DiscordChannelRaw[];
+
+    // Mapear categorías (type 4 = GUILD_CATEGORY)
+    const categoriesById = new Map<string, DiscordChannelRaw>();
+    for (const c of allChannels) {
+      if (c.type === 4) {
+        categoriesById.set(c.id, c);
+      }
+    }
+
+    // Filtrar solo canales de texto normales (type 0 = GUILD_TEXT) que NO sean privados
+    const textChannels = allChannels.filter((c) => c.type === 0);
+
+    const safeChannels = textChannels.filter((c) => {
+      const isPrivate = isChannelPrivate(c, categoriesById, guildId);
+      if (isPrivate) {
+        console.log(`[discordgram] Skipping private/restricted channel: #${c.name} (${c.id})`);
+      }
+      return !isPrivate;
+    });
+
+    return safeChannels.map((c) => ({ id: c.id, name: c.name }));
   } catch (err) {
-    console.error("Error obteniendo canales del servidor de Discord:", err);
+    console.error("Error listing guild channels from Discord:", err);
     return [];
+  }
+}
+
+/**
+ * Comprueba individualmente si un canal es privado consultando Discord API
+ */
+export async function checkIfChannelIsPrivate(
+  env: Env,
+  channelId: string,
+  guildId?: string
+): Promise<boolean> {
+  try {
+    const res = await discordFetch(env, "GET", `/channels/${channelId}`);
+    const chan = (await res.json()) as DiscordChannelRaw;
+
+    let categoriesById: Map<string, DiscordChannelRaw> | undefined;
+    const gId = guildId || chan.guild_id || env.DISCORD_GUILD_ID;
+
+    if (chan.parent_id && gId) {
+      try {
+        const catRes = await discordFetch(env, "GET", `/channels/${chan.parent_id}`);
+        const cat = (await catRes.json()) as DiscordChannelRaw;
+        categoriesById = new Map([[cat.id, cat]]);
+      } catch {
+        // Ignorar si no se puede leer la categoría
+      }
+    }
+
+    return isChannelPrivate(chan, categoriesById, gId);
+  } catch {
+    return false;
   }
 }
 

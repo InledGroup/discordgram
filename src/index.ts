@@ -9,6 +9,7 @@ import {
 import { getDefaultChatId } from "./config";
 import { serveDashboardHtml } from "./dashboard";
 import {
+  checkIfChannelIsPrivate,
   discordSafeName,
   getBotGuilds,
   getChannelName,
@@ -286,6 +287,13 @@ async function handleDiscordChannelCreated(env: Env, channelData: any): Promise<
     // type 0 = GUILD_TEXT
     if (channelData.type !== 0) return;
 
+    // Strict security check: Skip private / moderator-only / staff / devs / raidprotect channels
+    const isPrivate = await checkIfChannelIsPrivate(env, channelData.id, channelData.guild_id);
+    if (isPrivate) {
+      console.log(`[discordgram] Skipping auto-sync for private channel: #${channelData.name} (${channelData.id})`);
+      return;
+    }
+
     const channelMap = await getChannelMap(env);
     if (channelMap[channelData.id]) return;
 
@@ -298,14 +306,19 @@ async function handleDiscordChannelCreated(env: Env, channelData: any): Promise<
       name: channelData.name,
     });
 
-    console.log(`[discordgram] Auto-sincronizado nuevo canal #${channelData.name} -> Tema ${topic.message_thread_id}`);
+    console.log(`[discordgram] Auto-synchronized new channel #${channelData.name} -> Topic ${topic.message_thread_id}`);
   } catch (err) {
-    console.error("Error auto-creando tema para nuevo canal de Discord:", err);
+    console.error("Error auto-creating topic for new Discord channel:", err);
   }
 }
 
 async function forwardDiscordToTelegram(env: Env, message: DiscordMessage): Promise<void> {
   if (message.author?.bot) return;
+
+  // Extra security check: Never forward messages from private channels
+  if (await checkIfChannelIsPrivate(env, message.channel_id, message.guild_id)) {
+    return;
+  }
 
   const channelMap = await getChannelMap(env);
   const target = findTelegramForDiscord(channelMap, message.channel_id);
@@ -351,6 +364,15 @@ async function handleAddChannel(request: Request, env: Env): Promise<Response> {
 
     if (!body.channelId) {
       return new Response("Missing channelId", { status: 400 });
+    }
+
+    // Security check: Block private / restricted channels
+    const isPrivate = await checkIfChannelIsPrivate(env, body.channelId);
+    if (isPrivate) {
+      return Response.json(
+        { ok: false, error: "Security restriction: Channel is private/restricted (moderators, devs, raidprotect). Synchronization is blocked." },
+        { status: 400 }
+      );
     }
 
     const chatId = body.chatId || getDefaultChatId(env);

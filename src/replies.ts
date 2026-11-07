@@ -1,7 +1,7 @@
 import { DiscordMessage, TelegramMessage } from "./types";
 
 /**
- * Escapa caracteres especiales para parse_mode HTML de Telegram
+ * Escapes special characters for Telegram HTML parse_mode
  */
 export function escapeHtml(s: string): string {
   return s
@@ -11,7 +11,7 @@ export function escapeHtml(s: string): string {
 }
 
 /**
- * Trunca texto largo para citas previas
+ * Truncates long text for preview reply quotes
  */
 function truncateText(text: string, maxLen = 140): string {
   const clean = text.replace(/[\r\n]+/g, " ").trim();
@@ -20,53 +20,53 @@ function truncateText(text: string, maxLen = 140): string {
 }
 
 /**
- * Formatea la cita de respuesta de un mensaje de Discord para Telegram (usando <blockquote> HTML)
+ * Formats a Discord reply quote for Telegram (using HTML <blockquote>)
  */
 export function formatDiscordReplyQuote(referenced: DiscordMessage | null | undefined): string {
   if (!referenced) return "";
 
-  const authorName = referenced.author?.global_name || referenced.author?.username || "Usuario";
+  const authorName = referenced.author?.global_name || referenced.author?.username || "User";
   let content = referenced.content ? truncateText(referenced.content) : "";
 
   if (!content && referenced.attachments && referenced.attachments.length > 0) {
     const isImage = referenced.attachments.some(a => a.content_type?.startsWith("image/"));
     const isVideo = referenced.attachments.some(a => a.content_type?.startsWith("video/"));
-    content = isImage ? "[🖼️ Imagen]" : isVideo ? "[🎥 Vídeo]" : "[📎 Archivo adjunto]";
+    content = isImage ? "[🖼️ Photo]" : isVideo ? "[🎥 Video]" : "[📎 Attachment]";
   }
 
   if (!content) {
-    content = "[Mensaje anterior]";
+    content = "[Previous message]";
   }
 
-  return `<blockquote><b>↩️ En respuesta a @${escapeHtml(authorName)}:</b>\n${escapeHtml(content)}</blockquote>\n`;
+  return `<blockquote><b>↩️ In reply to @${escapeHtml(authorName)}:</b>\n${escapeHtml(content)}</blockquote>\n`;
 }
 
 /**
- * Formatea la cita de respuesta de un mensaje de Telegram para Discord (usando formato > Blockquote)
+ * Formats a Telegram reply quote for Discord (using markdown > Blockquote)
  */
 export function formatTelegramReplyQuote(replyTo: TelegramMessage | null | undefined): string {
   if (!replyTo) return "";
 
-  // Ignorar si es el mensaje automático de creación del tema del foro
+  // Ignore if it's the forum topic creation message
   if (replyTo.forum_topic_created) return "";
 
   const from = replyTo.from;
-  const authorName = from ? (from.first_name + (from.last_name ? ` ${from.last_name}` : "")) : "Usuario";
+  const authorName = from ? (from.first_name + (from.last_name ? ` ${from.last_name}` : "")) : "User";
 
   let content = replyTo.text || replyTo.caption || "";
   if (content) {
     content = truncateText(content);
   } else if (replyTo.photo && replyTo.photo.length > 0) {
-    content = "[🖼️ Foto]";
+    content = "[🖼️ Photo]";
   } else if (replyTo.video) {
-    content = "[🎥 Vídeo]";
+    content = "[🎥 Video]";
   } else if (replyTo.animation) {
     content = "[🎞️ GIF]";
   } else if (replyTo.document) {
-    content = `[📎 Documento: ${replyTo.document.file_name || "archivo"}]`;
+    content = `[📎 Document: ${replyTo.document.file_name || "file"}]`;
   } else {
-    content = "[Mensaje anterior]";
+    content = "[Previous message]";
   }
 
-  return `> ↩️ **En respuesta a @${authorName}:** ${content}\n\n`;
+  return `> ↩️ **In reply to @${authorName}:** ${content}\n\n`;
 }
