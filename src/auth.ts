@@ -105,8 +105,8 @@ export async function verifyAltcha(
  * Comprueba si la contraseña introducida coincide
  */
 export function verifyPassword(password: string | undefined, env: Env): boolean {
-  const expected = env.DASHBOARD_PASSWORD || "admin";
-  if (!password) return false;
+  const expected = env.DASHBOARD_PASSWORD;
+  if (!password || !expected) return false;
   return password === expected;
 }
 
@@ -378,9 +378,7 @@ export function renderLoginPage(error?: string): Response {
 
   <!-- Logo centrado -->
   <div class="logo-container">
-    <div class="logo-text">
-      <span><span class="logo-i-dot">İ</span>NLED</span>
-    </div>
+    <img src="https://hosted.inled.es/cdn/inled-logo-full.png" alt="INLED" style="height: 48px; width: auto;" />
   </div>
 
   <!-- Tarjeta del formulario -->

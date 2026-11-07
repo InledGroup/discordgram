@@ -243,7 +243,7 @@ const DASHBOARD_HTML = `<!doctype html>
   <header>
     <div>
       <div class="brand">
-        <div class="brand-logo"><span><span class="dot">İ</span>NLED</span></div>
+        <img src="https://hosted.inled.es/cdn/inled-logo-full.png" alt="INLED" style="height: 36px; width: auto;" />
         <span class="badge">discordgram v2.0</span>
       </div>
       <p class="sub">Puente bidireccional Discord ⇄ Telegram (Cloudflare Workers)</p>

@@ -13,14 +13,11 @@ DISCORD_GUILD_ID = ""
 # Crear tema automáticamente en Telegram cuando se crea un canal de texto en Discord
 AUTO_CREATE_TOPICS = "true"
 
-# Contraseña de acceso al panel web (recomendado configurar con 'wrangler secret put DASHBOARD_PASSWORD')
-DASHBOARD_PASSWORD = "admin"
-
 # Secretos requeridos (configurar con 'wrangler secret put <NOMBRE>'):
 # - DISCORD_BOT_TOKEN
 # - TELEGRAM_BOT_TOKEN
 # - TELEGRAM_WEBHOOK_SECRET
-# - DASHBOARD_PASSWORD (opcional si se define en vars)
+# - DASHBOARD_PASSWORD
 # - ALTCHA_HMAC_KEY (opcional para firma del captcha)
 
 [[durable_objects.bindings]]
