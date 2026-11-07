@@ -91,19 +91,17 @@ export interface SendDiscordParams {
   content: string;
   username?: string;
   avatarUrl?: string | null;
-  fileBlob?: Blob | null;
-  fileName?: string;
 }
 
 /**
- * Envía un mensaje a Discord a través del webhook del canal (con soporte para adjuntos)
+ * Envía un mensaje a Discord a través del webhook del canal
  */
 export async function sendDiscordMessage(params: SendDiscordParams): Promise<void> {
-  const { env, channelId, content, username, avatarUrl, fileBlob, fileName } = params;
+  const { env, channelId, content, username, avatarUrl } = params;
   const webhookUrl = await getOrCreateWebhook(env, channelId);
 
   const payload: Record<string, unknown> = {
-    content: content || (fileBlob ? "" : " "),
+    content: content || " ",
   };
 
   const SUFFIX = " (sent from Telegram)";
@@ -117,24 +115,11 @@ export async function sendDiscordMessage(params: SendDiscordParams): Promise<voi
     payload.avatar_url = avatarUrl;
   }
 
-  let res: Response;
-
-  if (fileBlob) {
-    const formData = new FormData();
-    formData.append("files[0]", fileBlob, fileName || "file");
-    formData.append("payload_json", JSON.stringify(payload));
-
-    res = await fetch(webhookUrl, {
-      method: "POST",
-      body: formData,
-    });
-  } else {
-    res = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  }
+  const res = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 
   if (!res.ok) {
     const errText = await res.text();

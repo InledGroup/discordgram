@@ -117,47 +117,11 @@ export async function sendTelegramMessage(env: Env, opts: SendTelegramOptions): 
     basePayload.message_thread_id = threadId;
   }
 
-  // If there are attached images or videos from Discord
-  if (mediaItems && mediaItems.length > 0) {
-    const firstMedia = mediaItems[0];
-    const isSingle = mediaItems.length === 1;
-
-    try {
-      if (firstMedia.type === "photo" && isSingle) {
-        if (fullMessage.length <= 1024) {
-          await callApi(env, "sendPhoto", {
-            ...basePayload,
-            photo: firstMedia.url,
-            caption: fullMessage || undefined,
-            parse_mode: "HTML",
-          });
-          return;
-        }
-      } else if (firstMedia.type === "video" && isSingle) {
-        if (fullMessage.length <= 1024) {
-          await callApi(env, "sendVideo", {
-            ...basePayload,
-            video: firstMedia.url,
-            caption: fullMessage || undefined,
-            parse_mode: "HTML",
-          });
-          return;
-        }
-      }
-    } catch (mediaErr) {
-      console.warn("Direct media delivery to Telegram failed, falling back to URLs:", mediaErr);
-    }
-  }
-
-  // Text message fallback or standard message
+  // Append media URLs directly to message content so Telegram previews them natively without binary upload
   let finalContent = fullMessage;
   if (mediaItems && mediaItems.length > 0) {
-    const mediaLinks = mediaItems.map((m, idx) => {
-      const label = m.type === "photo" ? "🖼️ Photo" : m.type === "video" ? "🎥 Video" : "📎 Attachment";
-      return `<a href="${m.url}">${label} ${idx + 1}</a>`;
-    }).join(" | ");
-
-    finalContent = finalContent ? `${finalContent}\n\n${mediaLinks}` : mediaLinks;
+    const mediaUrls = mediaItems.map((m) => m.url).join("\n");
+    finalContent = finalContent ? `${finalContent}\n\n${mediaUrls}` : mediaUrls;
   }
 
   if (!finalContent) return;

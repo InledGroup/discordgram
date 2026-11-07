@@ -524,7 +524,18 @@ document.getElementById('logout').addEventListener('click', async () => {
 
 refreshStatus();
 loadChannels();
-setInterval(refreshStatus, 5000);
+
+setInterval(() => {
+  if (document.visibilityState === 'visible') {
+    refreshStatus();
+  }
+}, 30000);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    refreshStatus();
+  }
+});
 </script>
 </body>
 </html>

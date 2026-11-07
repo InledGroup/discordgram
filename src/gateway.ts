@@ -19,9 +19,10 @@ const INTENTS = (1 << 0) | (1 << 9) | (1 << 15);
 export class DiscordGateway extends DurableObject {
   private ws: WebSocket | null = null;
   private seq: number | null = null;
-  private heartbeatIntervalMs = 41250;
+  private heartbeatTimer: any = null;
   private connected = false;
   private reconnectAttempt = 0;
+  private memoryLastDispatch: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -36,22 +37,30 @@ export class DiscordGateway extends DurableObject {
   }
 
   async alarm(): Promise<void> {
+    // Alarm is now only invoked as a fallback retry when disconnected
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.connected) {
       await this.connectGateway(undefined, true);
-      return;
     }
-    await this.sendHeartbeat();
   }
 
-  async scheduleAlarm(delayMs: number): Promise<void> {
-    await this.ctx.storage.setAlarm(Date.now() + delayMs);
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
-  async sendHeartbeat(): Promise<void> {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ op: OP.HEARTBEAT, d: this.seq }));
-      await this.scheduleAlarm(this.heartbeatIntervalMs);
-    }
+  private startHeartbeat(intervalMs: number): void {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ op: OP.HEARTBEAT, d: this.seq }));
+      } else {
+        this.stopHeartbeat();
+        this.connected = false;
+        this.retry();
+      }
+    }, intervalMs);
   }
 
   async connectGateway(webhookUrl?: string, force = false): Promise<void> {
@@ -69,6 +78,8 @@ export class DiscordGateway extends DurableObject {
       return;
     }
 
+    this.stopHeartbeat();
+
     try {
       this.ws?.close();
     } catch {
@@ -84,18 +95,20 @@ export class DiscordGateway extends DurableObject {
 
     ws.addEventListener("close", () => {
       this.connected = false;
+      this.stopHeartbeat();
       this.retry();
     });
 
     ws.addEventListener("error", () => {
       this.connected = false;
+      this.stopHeartbeat();
     });
   }
 
   private retry(): void {
     const backoff = Math.min(30000, 1000 * 2 ** this.reconnectAttempt);
     this.reconnectAttempt += 1;
-    void this.scheduleAlarm(backoff + Math.random() * 500);
+    void this.ctx.storage.setAlarm(Date.now() + backoff + Math.random() * 500);
   }
 
   private async handleGatewayMessage(raw: string): Promise<void> {
@@ -111,24 +124,25 @@ export class DiscordGateway extends DurableObject {
     switch (msg.op) {
       case OP.HELLO: {
         const hello = msg.d;
-        this.heartbeatIntervalMs = hello.heartbeat_interval;
         this.connected = true;
         this.reconnectAttempt = 0;
+        this.startHeartbeat(hello.heartbeat_interval);
         this.ws?.send(JSON.stringify({ op: OP.IDENTIFY, d: this.identifyPayload() }));
-        await this.scheduleAlarm(this.heartbeatIntervalMs);
         break;
       }
       case OP.HEARTBEAT_ACK: {
-        await this.scheduleAlarm(this.heartbeatIntervalMs);
+        // Heartbeat acknowledged in memory
         break;
       }
       case OP.RECONNECT: {
         this.connected = false;
+        this.stopHeartbeat();
         await this.connectGateway(undefined, true);
         break;
       }
       case OP.INVALID_SESSION: {
         this.connected = false;
+        this.stopHeartbeat();
         await this.delay(1500 + Math.random() * 1500);
         await this.connectGateway(undefined, true);
         break;
@@ -167,7 +181,8 @@ export class DiscordGateway extends DurableObject {
     }
 
     if (msg.t === "MESSAGE_CREATE") {
-      await this.ctx.storage.put("lastDispatch", new Date().toISOString());
+      // Keep in RAM without burning DO storage writes on every single message
+      this.memoryLastDispatch = new Date().toISOString();
       await this.forwardEvent("MESSAGE_CREATE", msg.d);
       return;
     }
@@ -223,7 +238,7 @@ export class DiscordGateway extends DurableObject {
 
   async status() {
     const open = this.ws?.readyState === WebSocket.OPEN && this.connected;
-    const lastDispatch = (await this.ctx.storage.get<string>("lastDispatch")) ?? null;
+    const lastDispatch = this.memoryLastDispatch;
     const seenRecently =
       !!lastDispatch && Date.now() - new Date(lastDispatch).getTime() < 2 * 60 * 1000;
 

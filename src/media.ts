@@ -59,17 +59,16 @@ export function extractDiscordMedia(attachments?: DiscordAttachment[]): MediaIte
 }
 
 /**
- * Obtiene la URL de descarga directa y nombre de archivo para un medio de Telegram
+ * Obtiene la ruta relativa del archivo en los servidores de Telegram
  */
-export async function getTelegramMediaFile(
+export async function getTelegramMediaFilePath(
   env: Env,
   message: TelegramMessage
-): Promise<{ fileUrl: string; filename: string; contentType?: string } | null> {
+): Promise<{ filePath: string; filename: string } | null> {
   let fileId: string | undefined;
   let filename = "media";
 
   if (message.photo && message.photo.length > 0) {
-    // Tomar la versión de mayor resolución (última en el array)
     const best = message.photo[message.photo.length - 1];
     fileId = best.file_id;
     filename = `photo_${best.file_unique_id}.jpg`;
@@ -99,7 +98,7 @@ export async function getTelegramMediaFile(
     if (!filePath) return null;
 
     return {
-      fileUrl: `${TELEGRAM_API}/file/bot${env.TELEGRAM_BOT_TOKEN}/${filePath}`,
+      filePath,
       filename,
     };
   } catch (err) {

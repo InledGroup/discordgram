@@ -17,7 +17,7 @@ import {
   sendDiscordMessage,
 } from "./discord";
 import { DiscordGateway } from "./gateway";
-import { extractDiscordMedia, getTelegramMediaFile } from "./media";
+import { extractDiscordMedia, getTelegramMediaFilePath } from "./media";
 import { formatDiscordReplyQuote, formatTelegramReplyQuote } from "./replies";
 import { StatusStore } from "./status";
 import {
@@ -51,6 +51,21 @@ export default {
 
     if (path === "/discord/events") {
       return await handleDiscordEvent(request, env, ctx);
+    }
+
+    // Streaming seguro de medios de Telegram para Discord (sin almacenar en Cloudflare)
+    if (path.startsWith("/media/tg/")) {
+      const filePath = decodeURIComponent(path.slice("/media/tg/".length));
+      if (!filePath || filePath.includes("..")) {
+        return new Response("Invalid media path", { status: 400 });
+      }
+      const tgRes = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${filePath}`);
+      return new Response(tgRes.body, {
+        headers: {
+          "Content-Type": tgRes.headers.get("Content-Type") || "application/octet-stream",
+          "Cache-Control": "public, max-age=86400",
+        },
+      });
     }
 
     // Reto ALTCHA público para el login
@@ -184,13 +199,18 @@ async function handleTelegramWebhook(
   );
 
   if (hasContent || hasMedia) {
-    ctx.waitUntil(forwardTelegramMessage(env, message));
+    const origin = new URL(request.url).origin;
+    ctx.waitUntil(forwardTelegramMessage(env, message, origin));
   }
 
   return new Response("ok");
 }
 
-async function forwardTelegramMessage(env: Env, message: TelegramMessage): Promise<void> {
+async function forwardTelegramMessage(
+  env: Env,
+  message: TelegramMessage,
+  baseUrl: string
+): Promise<void> {
   try {
     const chatId = message.chat.id;
     const threadId = message.message_thread_id ?? 0;
@@ -219,31 +239,20 @@ async function forwardTelegramMessage(env: Env, message: TelegramMessage): Promi
       avatarUrl = await resolveTelegramAvatar(env, from);
     }
 
-    // 4. Medios (fotos, vídeos, documentos)
-    let fileBlob: Blob | null = null;
-    let fileName: string | undefined;
-
-    const mediaInfo = await getTelegramMediaFile(env, message);
+    // 4. Medios (fotos, vídeos, documentos): extraer URL e incrustar sin descargar archivos a Cloudflare
+    let finalContent = content;
+    const mediaInfo = await getTelegramMediaFilePath(env, message);
     if (mediaInfo) {
-      try {
-        const fileRes = await fetch(mediaInfo.fileUrl);
-        if (fileRes.ok) {
-          fileBlob = await fileRes.blob();
-          fileName = mediaInfo.filename;
-        }
-      } catch (dlErr) {
-        console.error("Error descargando medio de Telegram:", dlErr);
-      }
+      const mediaEmbedUrl = `${baseUrl}/media/tg/${encodeURIComponent(mediaInfo.filePath)}`;
+      finalContent = finalContent ? `${finalContent}\n${mediaEmbedUrl}` : mediaEmbedUrl;
     }
 
     await sendDiscordMessage({
       env,
       channelId: discordChannelId,
-      content,
+      content: finalContent,
       username: discordSafeName(username),
       avatarUrl,
-      fileBlob,
-      fileName,
     });
 
     await recordStatus(env, {

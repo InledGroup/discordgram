@@ -3,6 +3,9 @@ import { INITIAL_CHANNEL_MAP } from "./config";
 import { AppStatus, ChannelMap, ChannelTarget, Env } from "./types";
 
 export class StatusStore extends DurableObject {
+  private memoryStatus: AppStatus | null = null;
+  private memoryChannels: ChannelMap | null = null;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
   }
@@ -19,27 +22,33 @@ export class StatusStore extends DurableObject {
   }
 
   async readStatus(): Promise<AppStatus> {
+    if (this.memoryStatus) return this.memoryStatus;
     const s = await this.ctx.storage.get<AppStatus>("status");
-    return s ?? this.emptyStatus();
+    this.memoryStatus = s ?? this.emptyStatus();
+    return this.memoryStatus;
   }
 
   async writeStatus(status: AppStatus): Promise<void> {
-    await this.ctx.storage.put("status", status);
+    // Keep in RAM without burning storage writes on every single message
+    this.memoryStatus = status;
   }
 
   async readChannels(): Promise<ChannelMap> {
+    if (this.memoryChannels) return this.memoryChannels;
     const channels = await this.ctx.storage.get<ChannelMap>("channels");
     if (!channels || Object.keys(channels).length === 0) {
-      // Guardar mapa inicial en almacenamiento persistente
       await this.ctx.storage.put("channels", INITIAL_CHANNEL_MAP);
-      return { ...INITIAL_CHANNEL_MAP };
+      this.memoryChannels = { ...INITIAL_CHANNEL_MAP };
+      return this.memoryChannels;
     }
-    return channels;
+    this.memoryChannels = channels;
+    return this.memoryChannels;
   }
 
   async setChannel(channelId: string, target: ChannelTarget): Promise<ChannelMap> {
     const channels = await this.readChannels();
     channels[channelId] = target;
+    this.memoryChannels = channels;
     await this.ctx.storage.put("channels", channels);
     return channels;
   }
@@ -47,6 +56,7 @@ export class StatusStore extends DurableObject {
   async deleteChannel(channelId: string): Promise<ChannelMap> {
     const channels = await this.readChannels();
     delete channels[channelId];
+    this.memoryChannels = channels;
     await this.ctx.storage.put("channels", channels);
     return channels;
   }
