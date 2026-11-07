@@ -7,9 +7,6 @@ compatibility_flags = ["nodejs_compat"]
 # ID del supergrupo de Telegram con foros/temas activados (ej: "-1001234567890")
 DEFAULT_TELEGRAM_CHAT_ID = "-1001234567890"
 
-# ID de tu servidor de Discord (necesario para /syncall y auto-descubrimiento)
-DISCORD_GUILD_ID = ""
-
 # Crear tema automáticamente en Telegram cuando se crea un canal de texto en Discord
 AUTO_CREATE_TOPICS = "true"
 

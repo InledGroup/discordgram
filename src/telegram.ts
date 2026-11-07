@@ -1,5 +1,5 @@
 import { TELEGRAM_API } from "./config";
-import { getChannelName, listGuildTextChannels } from "./discord";
+import { getBotGuilds, getChannelName, listGuildTextChannels } from "./discord";
 import { MediaItem } from "./media";
 import { escapeHtml } from "./replies";
 import { deleteChannelMapping, findDiscordForTelegram, getChannelMap, saveChannelMapping } from "./storage";
@@ -249,12 +249,18 @@ export async function handleTelegramCommands(
     }
 
     case "/syncall": {
-      const guildId = args[0]?.trim() || env.DISCORD_GUILD_ID;
+      let guildId = args[0]?.trim() || env.DISCORD_GUILD_ID;
+      if (!guildId) {
+        const guilds = await getBotGuilds(env);
+        if (guilds.length > 0) {
+          guildId = guilds[0].id;
+        }
+      }
+
       if (!guildId) {
         await reply(
-          "ℹ️ <b>Uso:</b> <code>/syncall &lt;DISCORD_GUILD_ID&gt;</code>\n" +
-          "O define la variable <code>DISCORD_GUILD_ID</code> en tu <code>wrangler.toml</code>.\n\n" +
-          "Esto creará automáticamente un tema en Telegram para cada canal de texto de tu Discord."
+          "ℹ️ <b>Uso:</b> <code>/syncall &lt;DISCORD_GUILD_ID&gt;</code>\n\n" +
+          "No se detectó el servidor de Discord automáticamente. Por favor indica el ID de servidor."
         );
         return true;
       }
