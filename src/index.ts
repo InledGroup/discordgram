@@ -366,13 +366,10 @@ async function handleAddChannel(request: Request, env: Env): Promise<Response> {
       return new Response("Missing channelId", { status: 400 });
     }
 
-    // Security check: Block private / restricted channels
+    // Notice: If channel is private, log warning for telemetry
     const isPrivate = await checkIfChannelIsPrivate(env, body.channelId);
     if (isPrivate) {
-      return Response.json(
-        { ok: false, error: "Security restriction: Channel is private/restricted (moderators, devs, raidprotect). Synchronization is blocked." },
-        { status: 400 }
-      );
+      console.warn(`[discordgram] Admin linking potentially restricted channel: ${body.channelId}`);
     }
 
     const chatId = body.chatId || getDefaultChatId(env);

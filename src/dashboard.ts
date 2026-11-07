@@ -49,18 +49,11 @@ const DASHBOARD_HTML = `<!doctype html>
   .brand {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
   }
-  .brand-logo {
-    font-size: 1.6rem;
-    font-weight: 800;
-    color: var(--telegram);
-    display: flex;
-    align-items: center;
-  }
-  .brand-logo span.dot {
-    color: var(--red);
-    display: inline-block;
+  .brand img {
+    height: 36px;
+    width: auto;
   }
   .badge {
     font-size: 0.75rem;
@@ -207,11 +200,12 @@ const DASHBOARD_HTML = `<!doctype html>
   }
   button:hover { background: var(--btn-primary-hover); }
   button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
   button.danger {
     background: #fef2f2;
     color: #dc2626;
     border: 1px solid #fecaca;
-    padding: 6px 12px;
+    padding: 6px 14px;
     font-size: 0.82rem;
   }
   button.danger:hover { background: #fee2e2; }
@@ -229,12 +223,13 @@ const DASHBOARD_HTML = `<!doctype html>
     right: 24px;
     background: #0f172a;
     color: #fff;
-    padding: 12px 20px;
+    padding: 14px 22px;
     border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
     display: none;
-    z-index: 100;
-    font-size: 0.9rem;
+    z-index: 1000;
+    font-size: 0.92rem;
+    font-weight: 500;
   }
 </style>
 </head>
@@ -243,7 +238,7 @@ const DASHBOARD_HTML = `<!doctype html>
   <header>
     <div>
       <div class="brand">
-        <img src="https://hosted.inled.es/cdn/inled-logo-full.png" alt="INLED" style="height: 36px; width: auto;" />
+        <img src="https://hosted.inled.es/cdn/inled-logo-full.png" alt="INLED" />
         <span class="badge">discordgram v2.0</span>
       </div>
       <p class="sub">Puente bidireccional Discord ⇄ Telegram (Cloudflare Workers)</p>
@@ -278,7 +273,7 @@ const DASHBOARD_HTML = `<!doctype html>
       <button id="btn-syncall" class="secondary" style="font-size:0.85rem; padding:6px 14px;">⚡ Auto-sincronizar Todo</button>
     </div>
     <p class="desc">
-      Los mensajes, fotos, vídeos y citas de respuesta se reenvían en tiempo real entre estos canales de Discord y temas de Telegram.
+      Mensajes, fotos, vídeos y citas de respuesta se reenvían en tiempo real entre estos canales de Discord y temas de Telegram.
     </p>
 
     <table>
@@ -298,11 +293,11 @@ const DASHBOARD_HTML = `<!doctype html>
     <div class="form-row">
       <div class="form-group">
         <label>ID Canal de Discord</label>
-        <input type="text" id="new-channel-id" placeholder="Ej: 123456789012345678" />
+        <input type="text" id="new-channel-id" placeholder="Ej: 1521456678195957802" />
       </div>
       <div class="form-group">
         <label>ID Tema Telegram (threadId)</label>
-        <input type="number" id="new-thread-id" placeholder="Auto-crear si se deja vacío" />
+        <input type="number" id="new-thread-id" placeholder="0 para General, o vacío para auto-crear" />
       </div>
       <div class="form-group" style="max-width: 140px;">
         <label>&nbsp;</label>
@@ -310,7 +305,7 @@ const DASHBOARD_HTML = `<!doctype html>
       </div>
     </div>
     <small style="display:block; color:var(--text-muted); margin-top:10px; font-size:0.84rem;">
-      💡 <b>Auto-sincronización:</b> Al crear un canal nuevo en Discord, el tema en Telegram se crea automáticamente. También puedes usar en Telegram los comandos <code>/sync &lt;id_canal&gt;</code> o <code>/syncall</code>.
+      💡 <b>Para vincular a un tema existente:</b> Pon el ID del canal de Discord y el ID del tema (ej. <code>0</code> para el General de Telegram).
     </small>
   </div>
 
@@ -320,11 +315,13 @@ const DASHBOARD_HTML = `<!doctype html>
 <div id="toast" class="toast"></div>
 
 <script>
+let toastTimer = null;
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.style.display = 'block';
-  setTimeout(() => { t.style.display = 'none'; }, 3500);
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.display = 'none'; }, 4000);
 }
 
 function fmt(iso) {
@@ -377,7 +374,7 @@ async function loadChannels() {
 
     const entries = Object.entries(channels);
     if (entries.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted); text-align:center;">No hay canales configurados todavía. Añade uno abajo o crea un canal en Discord.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted); text-align:center;">No hay canales configurados todavía. Añade uno abajo.</td></tr>';
       return;
     }
 
@@ -391,7 +388,7 @@ async function loadChannels() {
         <td><code>\${threadLabel}</code></td>
         <td><code>\${target.chatId}</code></td>
         <td style="text-align: right;">
-          <button class="danger" onclick="deleteChannel('\${chanId}')">Desvincular</button>
+          <button class="danger btn-delete" data-channel-id="\${chanId}">Desvincular</button>
         </td>
       \`;
       tbody.appendChild(tr);
@@ -401,29 +398,51 @@ async function loadChannels() {
   }
 }
 
-async function deleteChannel(channelId) {
-  if (!confirm('¿Seguro que deseas desvincular este canal?')) return;
+// Delegación de eventos para los botones Desvincular
+document.getElementById('channels-tbody').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.btn-delete');
+  if (!btn) return;
+
+  const channelId = btn.getAttribute('data-channel-id');
+  if (!channelId) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Eliminando...';
+
   try {
     const res = await fetch('/api/channels/' + channelId, { method: 'DELETE' });
     if (res.ok) {
-      showToast('Canal desvinculado.');
-      loadChannels();
+      showToast('Canal desvinculado con éxito.');
+      await loadChannels();
     } else {
-      showToast('Error al desvincular: ' + await res.text());
+      const errText = await res.text();
+      showToast('Error al desvincular: ' + errText);
+      btn.disabled = false;
+      btn.textContent = 'Desvincular';
     }
   } catch (err) {
-    showToast('Error: ' + err);
+    showToast('Error de red: ' + err);
+    btn.disabled = false;
+    btn.textContent = 'Desvincular';
   }
-}
+});
 
-document.getElementById('btn-add-channel').onclick = async () => {
-  const channelId = document.getElementById('new-channel-id').value.trim();
-  const threadIdVal = document.getElementById('new-thread-id').value.trim();
+// Botón Vincular Canal
+document.getElementById('btn-add-channel').addEventListener('click', async () => {
+  const channelInput = document.getElementById('new-channel-id');
+  const threadInput = document.getElementById('new-thread-id');
+  const channelId = channelInput.value.trim();
+  const threadIdVal = threadInput.value.trim();
 
   if (!channelId) {
-    alert('Ingresa el ID del canal de Discord.');
+    showToast('Ingresa el ID del canal de Discord.');
+    channelInput.focus();
     return;
   }
+
+  const btn = document.getElementById('btn-add-channel');
+  btn.disabled = true;
+  btn.textContent = 'Vinculando...';
 
   const payload = {
     channelId,
@@ -437,45 +456,71 @@ document.getElementById('btn-add-channel').onclick = async () => {
       body: JSON.stringify(payload)
     });
     if (res.ok) {
-      showToast('Canal vinculado con éxito.');
-      document.getElementById('new-channel-id').value = '';
-      document.getElementById('new-thread-id').value = '';
-      loadChannels();
+      showToast('¡Canal vinculado con éxito!');
+      channelInput.value = '';
+      threadInput.value = '';
+      await loadChannels();
     } else {
-      showToast('Error: ' + await res.text());
+      const data = await res.json().catch(() => ({}));
+      showToast('Error: ' + (data.error || 'No se pudo vincular el canal'));
     }
   } catch (err) {
     showToast('Error de conexión: ' + err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '+ Vincular';
   }
-};
+});
 
-document.getElementById('btn-syncall').onclick = async () => {
-  if (!confirm('¿Deseas auto-descubrir y sincronizar todos los canales de texto de Discord creando temas en Telegram?')) return;
+// Botón Auto-sincronizar Todo
+document.getElementById('btn-syncall').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-syncall');
+  btn.disabled = true;
+  btn.textContent = '⏳ Sincronizando...';
   showToast('Iniciando auto-sincronización...');
+
   try {
     const res = await fetch('/api/channels/auto-sync', { method: 'POST' });
     const data = await res.json();
     if (res.ok) {
-      showToast('¡Listo! Canales creados: ' + (data.createdCount ?? 0));
-      loadChannels();
+      showToast('¡Listo! Nuevos canales sincronizados: ' + (data.createdCount ?? 0));
+      await loadChannels();
     } else {
       showToast('Error: ' + (data.error || 'Fallo'));
     }
   } catch (err) {
     showToast('Error: ' + err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⚡ Auto-sincronizar Todo';
   }
-};
+});
 
-document.getElementById('reconnect').onclick = async () => {
-  await fetch('/api/connect', { method: 'POST' });
-  showToast('Reconectando Gateway...');
-  setTimeout(refreshStatus, 3000);
-};
+// Botón Reconectar Gateway
+document.getElementById('reconnect').addEventListener('click', async () => {
+  const btn = document.getElementById('reconnect');
+  btn.disabled = true;
+  btn.textContent = '⏳ Conectando...';
+  showToast('Reconectando Gateway de Discord...');
+  try {
+    await fetch('/api/connect', { method: 'POST' });
+    setTimeout(async () => {
+      await refreshStatus();
+      btn.disabled = false;
+      btn.textContent = '🔄 Reconectar Gateway';
+    }, 2500);
+  } catch (err) {
+    showToast('Error: ' + err);
+    btn.disabled = false;
+    btn.textContent = '🔄 Reconectar Gateway';
+  }
+});
 
-document.getElementById('logout').onclick = async () => {
+// Botón Cerrar sesión
+document.getElementById('logout').addEventListener('click', async () => {
   await fetch('/logout', { method: 'POST' });
   window.location.reload();
-};
+});
 
 refreshStatus();
 loadChannels();
