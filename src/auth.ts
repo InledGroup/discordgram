@@ -152,6 +152,8 @@ export function renderLoginPage(error?: string): Response {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Acceso Restringido - discordgram</title>
+<!-- Widget oficial de ALTCHA -->
+<script async defer src="https://cdn.jsdelivr.net/npm/altcha/dist/altcha.min.js" type="module"></script>
 <style>
   :root {
     --bg-page: #f8fafc;
@@ -257,74 +259,23 @@ export function renderLoginPage(error?: string): Response {
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
   }
 
-  /* Widget de ALTCHA integrado */
+  /* Widget de ALTCHA oficial */
   .altcha-box {
     margin-bottom: 24px;
     display: flex;
     justify-content: center;
   }
-  .altcha-widget-custom {
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    padding: 12px 16px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    background: #f8fafc;
+  altcha-widget {
+    --altcha-max-width: 100%;
+    --altcha-border-radius: 10px;
+    --altcha-border-width: 1px;
+    --altcha-color-base: #f8fafc;
+    --altcha-color-border: #cbd5e1;
+    --altcha-color-text: #334155;
     width: 100%;
-    max-width: 280px;
-    user-select: none;
+    max-width: 290px;
+    display: block;
   }
-  .altcha-checkbox {
-    width: 22px;
-    height: 22px;
-    border: 2px solid #94a3b8;
-    border-radius: 4px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #fff;
-    transition: all 0.2s ease;
-  }
-  .altcha-checkbox.checked {
-    background: #22c55e;
-    border-color: #22c55e;
-  }
-  .altcha-checkbox.checked::after {
-    content: "✓";
-    color: #fff;
-    font-size: 14px;
-    font-weight: bold;
-  }
-  .altcha-label {
-    flex: 1;
-    font-size: 0.88rem;
-    color: #334155;
-    cursor: pointer;
-  }
-  .altcha-brand {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    font-size: 0.65rem;
-    color: #64748b;
-  }
-  .altcha-icon {
-    width: 20px;
-    height: 20px;
-    border: 2px solid #475569;
-    border-top-color: transparent;
-    border-radius: 50%;
-    position: relative;
-  }
-  .altcha-icon.spin {
-    animation: spin 0.8s linear infinite;
-    border-color: #3b82f6;
-    border-top-color: transparent;
-  }
-  @keyframes spin { 100% { transform: rotate(360deg); } }
 
   /* Botón Entrar */
   button[type="submit"] {
@@ -394,19 +345,10 @@ export function renderLoginPage(error?: string): Response {
         <input type="password" id="password" name="password" placeholder="••••••••" required autofocus autocomplete="current-password" />
       </div>
 
-      <!-- ALTCHA Captcha -->
+      <!-- Widget Oficial de ALTCHA -->
       <div class="altcha-box">
-        <div class="altcha-widget-custom" id="altcha-box" onclick="triggerAltcha()">
-          <div class="altcha-checkbox" id="altcha-checkbox"></div>
-          <div class="altcha-label" id="altcha-label">I'm not a robot</div>
-          <div class="altcha-brand">
-            <div class="altcha-icon" id="altcha-icon"></div>
-            <span>Protected by ALTCHA</span>
-          </div>
-        </div>
+        <altcha-widget challengeurl="/api/altcha/challenge" hidefooter></altcha-widget>
       </div>
-
-      <input type="hidden" id="altcha-payload" name="altcha" />
 
       <button type="submit" id="btn-submit">
         <span>Entrar</span>
@@ -420,80 +362,19 @@ export function renderLoginPage(error?: string): Response {
   </footer>
 
 <script>
-let altchaSolved = false;
-let solving = false;
-
-async function sha256(str) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function triggerAltcha() {
-  if (altchaSolved || solving) return;
-  solving = true;
-
-  const icon = document.getElementById("altcha-icon");
-  const label = document.getElementById("altcha-label");
-  const checkbox = document.getElementById("altcha-checkbox");
-
-  icon.classList.add("spin");
-  label.textContent = "Verifying...";
-
-  try {
-    const res = await fetch("/api/altcha/challenge");
-    const ch = await res.json();
-
-    const max = ch.maxnumber || 30000;
-    let foundNumber = null;
-
-    // Resolver Proof-of-Work
-    for (let i = 0; i <= max; i++) {
-      const hash = await sha256(ch.salt + i);
-      if (hash === ch.challenge) {
-        foundNumber = i;
-        break;
-      }
-    }
-
-    if (foundNumber !== null) {
-      const solution = {
-        algorithm: ch.algorithm,
-        challenge: ch.challenge,
-        number: foundNumber,
-        salt: ch.salt,
-        signature: ch.signature
-      };
-
-      document.getElementById("altcha-payload").value = btoa(JSON.stringify(solution));
-      altchaSolved = true;
-
-      icon.classList.remove("spin");
-      icon.style.display = "none";
-      checkbox.classList.add("checked");
-      label.textContent = "Verified!";
-    } else {
-      throw new Error("No solution found");
-    }
-  } catch (err) {
-    icon.classList.remove("spin");
-    label.textContent = "Retry verification";
-    solving = false;
-  }
-}
-
 document.getElementById("login-form").onsubmit = async (e) => {
   e.preventDefault();
 
-  if (!altchaSolved) {
-    await triggerAltcha();
-    if (!altchaSolved) {
-      alert("Por favor completa la verificación de seguridad.");
-      return;
-    }
+  const altchaInput = document.querySelector('input[name="altcha"]');
+  const altchaWidget = document.querySelector('altcha-widget');
+  const altchaPayload = altchaInput?.value || altchaWidget?.value;
+
+  if (!altchaPayload) {
+    alert("Por favor completa la verificación de seguridad de ALTCHA.");
+    return;
   }
 
   const password = document.getElementById("password").value;
-  const altcha = document.getElementById("altcha-payload").value;
   const btn = document.getElementById("btn-submit");
 
   btn.disabled = true;
@@ -503,7 +384,7 @@ document.getElementById("login-form").onsubmit = async (e) => {
     const res = await fetch("/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password, altcha })
+      body: JSON.stringify({ password, altcha: altchaPayload })
     });
 
     if (res.ok) {

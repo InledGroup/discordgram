@@ -10,6 +10,7 @@ import { getDefaultChatId } from "./config";
 import { serveDashboardHtml } from "./dashboard";
 import {
   discordSafeName,
+  getBotGuilds,
   getChannelName,
   listGuildTextChannels,
   sendDiscordMessage,
@@ -383,10 +384,18 @@ async function handleAddChannel(request: Request, env: Env): Promise<Response> {
 
 async function handleAutoSync(env: Env): Promise<Response> {
   try {
-    const guildId = env.DISCORD_GUILD_ID;
+    let guildId = env.DISCORD_GUILD_ID;
+    if (!guildId) {
+      const guilds = await getBotGuilds(env);
+      if (guilds.length > 0) {
+        guildId = guilds[0].id;
+        console.log(`[discordgram] Servidor auto-detectado: ${guilds[0].name} (${guildId})`);
+      }
+    }
+
     if (!guildId) {
       return Response.json(
-        { ok: false, error: "Configura DISCORD_GUILD_ID en wrangler.toml o en variables de entorno." },
+        { ok: false, error: "No se detectó ningún servidor de Discord. Asegúrate de que el bot esté en tu servidor o configura DISCORD_GUILD_ID." },
         { status: 400 }
       );
     }

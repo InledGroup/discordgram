@@ -124,6 +124,22 @@ export async function getChannelName(env: Env, channelId: string): Promise<strin
 }
 
 /**
+ * Obtiene los servidores (guilds) a los que pertenece el bot de Discord
+ */
+export async function getBotGuilds(
+  env: Env
+): Promise<Array<{ id: string; name: string }>> {
+  try {
+    const res = await discordFetch(env, "GET", "/users/@me/guilds");
+    const guilds = (await res.json()) as Array<{ id: string; name: string }>;
+    return guilds.map((g) => ({ id: g.id, name: g.name }));
+  } catch (err) {
+    console.error("Error obteniendo servidores del bot de Discord:", err);
+    return [];
+  }
+}
+
+/**
  * Lista todos los canales de texto de un servidor (guild) de Discord
  */
 export async function listGuildTextChannels(
