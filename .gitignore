@@ -4,5 +4,6 @@ dist
 .env
 .dev.vars
 local_config.json
-standalone/
+standalone/config.json
+standalone/channels.json
 

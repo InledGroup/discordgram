@@ -1,8 +1,10 @@
 # discordgram
 
-> High-performance bidirectional bridge between Discord servers and Telegram forum supergroups, running on Cloudflare Workers using Durable Objects.
+> High-performance bidirectional bridge between Discord servers and Telegram forum supergroups.
+> Supports deployment on **Cloudflare Workers** or as a **Standalone Daemon** (Termux / Linux / Raspberry Pi) with 0 open ports and 0 cloud quotas.
 
-discordgram synchronizes text messages, reply quotes, photos, and videos in real time between Discord channels and Telegram forum topics. It includes automated channel synchronization, strict privacy protections for private staff channels, administrator-only command authorization, and an authenticated management dashboard protected by ALTCHA Proof-of-Work.
+> [!TIP]
+> **Running on Termux / Raspberry Pi / VPS?** Check out the [Standalone Daemon Guide](standalone/README.md) for 100% outbound, unlimited synchronization without Cloudflare Durable Object limits.
 
 ---
 
