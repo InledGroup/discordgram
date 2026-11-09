@@ -1,10 +1,13 @@
 # DiscordGram — Standalone Daemon (Termux / Linux / Raspberry Pi)
 
-A lightweight, 100% outbound, native Node.js bridge connecting **Discord channels** and **Telegram supergroup forum topics**.
+A lightweight, 100% outbound, native Node.js bridge connecting **Discord channels** and **Telegram supergroup forum topics**.  
+**This implementation replaces the one that relies on Cloudflare**  
+
+Actually, im running the gateway on my Xiaomi old phone. No noises when i sleep (like on raspberry or mini pc) and no cloudflare or limits.
 
 ---
 
-## 🔒 1. Network & Security Architecture
+## 1. Network & Security Architecture
 
 * **Zero Open Incoming Ports**:
   * **Discord**: Connects via outbound client WebSocket to `wss://gateway.discord.gg`.
@@ -15,7 +18,7 @@ A lightweight, 100% outbound, native Node.js bridge connecting **Discord channel
 
 ---
 
-## 📱 2. Android / Xiaomi Termux Setup & Battery Optimizations
+## 2. Android / Xiaomi Termux Setup & Battery Optimizations
 
 To keep Termux running 24/7 without being killed by Android or MIUI/HyperOS power management:
 
@@ -42,7 +45,7 @@ adb shell "settings put global settings_enable_monitor_phantom_procs false" 2>/d
 
 ---
 
-## 🚀 3. Installation Guide
+## 3. Installation Guide
 
 ### Step 1: Install Node.js, Git, and PM2
 Open Termux (or a Linux / Raspberry Pi terminal) and run:
@@ -81,7 +84,7 @@ Edit `config.json` (`nano config.json`):
 
 ---
 
-## ⚙️ 4. Process Management with PM2
+## 4. Process Management with PM2
 
 PM2 ensures the bridge runs continuously, restarts automatically if an unhandled network error occurs, and resumes after reboot.
 
@@ -108,7 +111,7 @@ echo 'pm2 resurrect 2>/dev/null' >> ~/.bashrc
 
 ---
 
-## 🔄 5. Managing Channel Mappings
+## 5. Managing Channel Mappings
 
 Channel links are saved automatically in `channels.json`.
 
