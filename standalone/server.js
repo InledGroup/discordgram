@@ -162,30 +162,60 @@ async function getOrCreateDiscordWebhook(channelId) {
   return url;
 }
 
-async function sendToDiscord(channelId, content, username, avatarUrl) {
+async function sendToDiscord(channelId, content, username, avatarUrl, attachments = []) {
   const webhookUrl = await getOrCreateDiscordWebhook(channelId);
-  const payload = { content: content || " " };
 
   const SUFFIX = " (sent from Telegram)";
+  let effectiveUsername = username;
   if (username) {
     const maxBase = 32 - SUFFIX.length;
     const base = username.length > maxBase ? username.slice(0, maxBase) : username;
-    payload.username = `${base}${SUFFIX}`;
+    effectiveUsername = `${base}${SUFFIX}`;
   }
 
-  if (avatarUrl) {
-    payload.avatar_url = avatarUrl;
+  // If no attachments, send simple JSON payload
+  if (!attachments || attachments.length === 0) {
+    const payload = { content: content || " " };
+    if (effectiveUsername) payload.username = effectiveUsername;
+    if (avatarUrl) payload.avatar_url = avatarUrl;
+
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Failed sending to Discord webhook: ${res.status} ${err}`);
+    }
+    return;
+  }
+
+  // With attachments: upload binary multipart/form-data (token is never leaked!)
+  const form = new FormData();
+  const payloadJson = {
+    content: content || "",
+  };
+  if (effectiveUsername) payloadJson.username = effectiveUsername;
+  if (avatarUrl) payloadJson.avatar_url = avatarUrl;
+
+  form.append("payload_json", JSON.stringify(payloadJson));
+
+  for (let i = 0; i < attachments.length; i++) {
+    const att = attachments[i];
+    const blob = new Blob([att.buffer], { type: att.contentType || "application/octet-stream" });
+    form.append(`files[${i}]`, blob, att.fileName || `file_${i}`);
   }
 
   const res = await fetch(webhookUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: form,
   });
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Failed sending to Discord webhook: ${res.status} ${err}`);
+    throw new Error(`Failed sending multipart attachment to Discord: ${res.status} ${err}`);
   }
 }
 
@@ -357,45 +387,67 @@ async function handleTelegramIncomingMessage(msg) {
   const replyQuote = formatTelegramReplyQuote(msg.reply_to_message);
   let content = `${replyQuote}${text}`.trim();
 
-  // Handle Telegram Media
-  const mediaUrls = [];
+  // Handle Telegram Media: Download binary in RAM and upload to Discord as native attachments (ZERO secrets leaked!)
+  const attachments = [];
+  let fileIdToDownload = null;
+  let defaultFileName = "attachment";
+  let contentType = "application/octet-stream";
+
   if (msg.photo && msg.photo.length > 0) {
     const largest = msg.photo[msg.photo.length - 1];
-    try {
-      const file = await callTelegramApi("getFile", { file_id: largest.file_id });
-      if (file.result?.file_path) {
-        mediaUrls.push(`${TELEGRAM_API}/file/bot${TELEGRAM_BOT_TOKEN}/${file.result.file_path}`);
-      }
-    } catch {}
-  }
-  if (msg.document) {
-    try {
-      const file = await callTelegramApi("getFile", { file_id: msg.document.file_id });
-      if (file.result?.file_path) {
-        mediaUrls.push(`${TELEGRAM_API}/file/bot${TELEGRAM_BOT_TOKEN}/${file.result.file_path}`);
-      }
-    } catch {}
-  }
-  if (msg.video) {
-    try {
-      const file = await callTelegramApi("getFile", { file_id: msg.video.file_id });
-      if (file.result?.file_path) {
-        mediaUrls.push(`${TELEGRAM_API}/file/bot${TELEGRAM_BOT_TOKEN}/${file.result.file_path}`);
-      }
-    } catch {}
-  }
-
-  if (mediaUrls.length > 0) {
-    content = content ? `${content}\n${mediaUrls.join("\n")}` : mediaUrls.join("\n");
+    fileIdToDownload = largest.file_id;
+    defaultFileName = "photo.jpg";
+    contentType = "image/jpeg";
+  } else if (msg.document) {
+    fileIdToDownload = msg.document.file_id;
+    defaultFileName = msg.document.file_name || "document.bin";
+    contentType = msg.document.mime_type || "application/octet-stream";
+  } else if (msg.video) {
+    fileIdToDownload = msg.video.file_id;
+    defaultFileName = msg.video.file_name || "video.mp4";
+    contentType = msg.video.mime_type || "video/mp4";
+  } else if (msg.audio) {
+    fileIdToDownload = msg.audio.file_id;
+    defaultFileName = msg.audio.file_name || "audio.mp3";
+    contentType = msg.audio.mime_type || "audio/mpeg";
+  } else if (msg.voice) {
+    fileIdToDownload = msg.voice.file_id;
+    defaultFileName = "voice.ogg";
+    contentType = "audio/ogg";
+  } else if (msg.animation) {
+    fileIdToDownload = msg.animation.file_id;
+    defaultFileName = msg.animation.file_name || "animation.gif";
+    contentType = msg.animation.mime_type || "image/gif";
   }
 
-  if (!content) return;
+  if (fileIdToDownload) {
+    try {
+      const fileInfo = await callTelegramApi("getFile", { file_id: fileIdToDownload });
+      const filePath = fileInfo.result?.file_path;
+      if (filePath) {
+        const downloadUrl = `${TELEGRAM_API}/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
+        const fileRes = await fetch(downloadUrl);
+        if (fileRes.ok) {
+          const arrayBuf = await fileRes.arrayBuffer();
+          attachments.push({
+            buffer: Buffer.from(arrayBuf),
+            fileName: defaultFileName,
+            contentType,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch Telegram media file:", err.message);
+    }
+  }
+
+  if (!content && attachments.length === 0) return;
 
   const avatarUrl = from ? await getTelegramUserAvatar(from) : null;
 
   try {
-    await sendToDiscord(discordChannelId, content, username, avatarUrl);
-    console.log(`[TG -> DC] Forwarded message from @${username} to Discord #${discordChannelId}`);
+    await sendToDiscord(discordChannelId, content, username, avatarUrl, attachments);
+    console.log(`[TG -> DC] Forwarded message from @${username} to Discord #${discordChannelId} (${attachments.length} attachments)`);
   } catch (err) {
     console.error(`[TG -> DC Error]:`, err.message);
   }
