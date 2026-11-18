@@ -52,9 +52,22 @@ const TELEGRAM_BOT_TOKEN = config.TELEGRAM_BOT_TOKEN;
 const DEFAULT_TELEGRAM_CHAT_ID = parseInt(config.DEFAULT_TELEGRAM_CHAT_ID, 10);
 const AUTO_CREATE_TOPICS = config.AUTO_CREATE_TOPICS === "true" || config.AUTO_CREATE_TOPICS === true;
 
+const OWNER_TELEGRAM_ID = config.OWNER_TELEGRAM_ID ? Number(config.OWNER_TELEGRAM_ID) : null;
+const OWNER_TELEGRAM_USERNAME = config.OWNER_TELEGRAM_USERNAME ? String(config.OWNER_TELEGRAM_USERNAME).toLowerCase() : "";
+
+const ALLOWED_ADMINS = [
+  ...(OWNER_TELEGRAM_ID ? [OWNER_TELEGRAM_ID] : []),
+  ...(config.ADMIN_TELEGRAM_USER_IDS || []).map((id) => Number(id)),
+];
+const ALLOWED_USERNAMES = [
+  ...(OWNER_TELEGRAM_USERNAME ? [OWNER_TELEGRAM_USERNAME] : []),
+  ...(config.ADMIN_TELEGRAM_USERNAMES || []).map((u) => String(u).toLowerCase()),
+];
+
 console.log("--------------------------------------------------");
 console.log("🚀 Starting DiscordGram Standalone Bridge");
 console.log(`• Node Version: ${process.version}`);
+console.log(`• Owner Configured: ${OWNER_TELEGRAM_ID ? "Yes (Protected)" : "Default"}`);
 console.log(`• Default Telegram Supergroup: ${DEFAULT_TELEGRAM_CHAT_ID}`);
 console.log(`• Initial Mapped Channels: ${Object.keys(channelMap).length}`);
 console.log(`• Auto-create Topics: ${AUTO_CREATE_TOPICS}`);
@@ -165,6 +178,12 @@ async function getOrCreateDiscordWebhook(channelId) {
 async function sendToDiscord(channelId, content, username, avatarUrl, attachments = []) {
   const webhookUrl = await getOrCreateDiscordWebhook(channelId);
 
+  // Safety: Discord enforces a 2000 character maximum limit on message content
+  let safeContent = content || "";
+  if (safeContent.length > 1900) {
+    safeContent = safeContent.slice(0, 1890) + "... [truncated]";
+  }
+
   const SUFFIX = " (sent from Telegram)";
   let effectiveUsername = username;
   if (username) {
@@ -175,7 +194,7 @@ async function sendToDiscord(channelId, content, username, avatarUrl, attachment
 
   // If no attachments, send simple JSON payload
   if (!attachments || attachments.length === 0) {
-    const payload = { content: content || " " };
+    const payload = { content: safeContent || " " };
     if (effectiveUsername) payload.username = effectiveUsername;
     if (avatarUrl) payload.avatar_url = avatarUrl;
 
@@ -195,7 +214,7 @@ async function sendToDiscord(channelId, content, username, avatarUrl, attachment
   // With attachments: upload binary multipart/form-data (token is never leaked!)
   const form = new FormData();
   const payloadJson = {
-    content: content || "",
+    content: safeContent || "",
   };
   if (effectiveUsername) payloadJson.username = effectiveUsername;
   if (avatarUrl) payloadJson.avatar_url = avatarUrl;
@@ -466,9 +485,49 @@ async function handleTelegramCommand(msg, text, chatId, threadId) {
     });
   };
 
+  // ------------------------------------------------------------------------
+  // STRICT SECURITY & AUTHORIZATION CHECK:
+  // Only the configured owner can execute ANY management commands!
+  // ------------------------------------------------------------------------
+  const senderId = msg.from ? msg.from.id : null;
+  const senderUsername = msg.from?.username ? msg.from.username.toLowerCase() : "";
+
+  const isAuthorized =
+    (senderId && ALLOWED_ADMINS.includes(senderId)) ||
+    (senderUsername && ALLOWED_USERNAMES.includes(senderUsername));
+
+  if (!isAuthorized) {
+    const senderDisplay = msg.from?.username ? `@${msg.from.username}` : `ID ${senderId}`;
+    console.warn(`[SECURITY ALERT] Blocked unauthorized command "${command}" from ${senderDisplay} in chat ${chatId}:${threadId}`);
+    await reply(
+      `⛔ <b>Access Denied:</b> You are not authorized to execute bot configuration commands.\n` +
+      `Only the authorized system owner can manage DiscordGram.`
+    );
+    return true; // Stop processing and drop command
+  }
+
   if (command === "/status") {
     const count = Object.keys(channelMap).length;
-    await reply(`🤖 <b>DiscordGram Status:</b>\n• Running on: Xiaomi Termux (Node.js)\n• Mapped Channels: ${count}\n• Mode: Outbound Long Polling (100% Secure)`);
+    await reply(
+      `🤖 <b>DiscordGram Status:</b>\n` +
+      `• <b>Running on:</b> Xiaomi Termux (Node.js)\n` +
+      `• <b>Mapped Channels:</b> ${count}\n` +
+      `• <b>Mode:</b> Outbound Long Polling (100% Secure)`
+    );
+    return true;
+  }
+
+  if (command === "/channels" || command === "/list") {
+    const entries = Object.entries(channelMap);
+    if (entries.length === 0) {
+      await reply("ℹ️ No channels are currently linked.");
+      return true;
+    }
+    const lines = entries.map(([dcId, target], idx) => {
+      const chanName = target.name || dcId;
+      return `${idx + 1}. <b>#${escapeHtml(chanName)}</b> (<code>${dcId}</code>) ➔ Thread <code>${target.threadId || 0}</code>`;
+    });
+    await reply(`📋 <b>Linked Channels (${entries.length}):</b>\n\n${lines.join("\n")}`);
     return true;
   }
 
@@ -479,23 +538,37 @@ async function handleTelegramCommand(msg, text, chatId, threadId) {
       return true;
     }
 
+    // Attempt to fetch real channel name from Discord
+    let chanName = `sync-${channelId}`;
+    try {
+      const chanRes = await fetch(`${DISCORD_API}/channels/${channelId}`, {
+        headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+      });
+      if (chanRes.ok) {
+        const chanData = await chanRes.json();
+        if (chanData.name) chanName = chanData.name;
+      }
+    } catch {}
+
     channelMap[channelId] = {
       chatId,
       threadId,
-      name: `sync-${channelId}`,
+      name: chanName,
     };
     saveChannels();
-    await reply(`✅ Channel <code>${channelId}</code> successfully linked to this topic!`);
-    console.log(`[Config] Linked channel ${channelId} to Telegram ${chatId}:${threadId}`);
+    await reply(`✅ Channel <b>#${escapeHtml(chanName)}</b> (<code>${channelId}</code>) successfully linked to this topic!`);
+    console.log(`[Config] Authorized sync: channel ${channelId} (${chanName}) linked to Telegram ${chatId}:${threadId} by @${senderUsername}`);
     return true;
   }
 
   if (command === "/unlink") {
     const discordId = findDiscordChannelForTelegram(chatId, threadId);
     if (discordId) {
+      const removedName = channelMap[discordId]?.name || discordId;
       delete channelMap[discordId];
       saveChannels();
-      await reply(`✅ Unlinked channel <code>${discordId}</code> from this topic.`);
+      await reply(`✅ Unlinked channel <b>#${escapeHtml(removedName)}</b> (<code>${discordId}</code>) from this topic.`);
+      console.log(`[Config] Authorized unlink: channel ${discordId} unlinked by @${senderUsername}`);
       return true;
     } else {
       await reply("⚠️ This topic is not linked to any Discord channel.");
